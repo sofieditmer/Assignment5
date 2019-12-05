@@ -1,0 +1,358 @@
+---
+title: "Assignment 5 - Meta-analysis of pitch in schizophrenia"
+author: "Sofie Ditmer"
+date: "3/7/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(pacman)
+p_load(Readxl, metafor, lmertest, lme4, dplyr, plyr)
+```
+
+# Building on the shoulders of giants: meta-analysis
+
+QUESTION 1: Do we find evidence in the literature for higher pitch mean in schizophrenic patients compared to healthy controls? If yes, do they all have a higher pitch?
+
+QUESTION 2: Do we see evidence for decreased variability in schizoprehinc patients comapred to healthy controls? What is the average variance in pitch that the single particpant has, and was is the average variance for schizoprehincs as a group, and is this constant across all participants, or do some schizoprehnic vary a lot in their pitch while others do not?
+
+A meta-analysis starts from a systematic review. 
+We want to extrac the effect size from the data. Different studies have done different things, and we want the general meta-analytical effect size from all of these studies. The average pitch may vary across studies, which means that it is hard to compare pitch between studies, because studies are measuring pitch in different ways - some are using logs some are using Hz, and this is why we calculate effect sizes, because these can be compared across studies. Cohen's d is a standardized effect size - each study is treated equally. By using standardized measures, we can control for differences in units between the studies and we are able to compare the studies with each other in terms of effect size. 
+To calculate an effect size we need to extract four things from the data: 
+        1. Sample size: how many schizoprhenics how many controls
+        2. Mean pitch: pitch mean for schizophrenic and pitch mean for controls
+        3. Standard deviation of pitch for schizophrenic and controls. 
+        
+We want to calculate an effect size for the mean pitch, and we want to calculate an effect size for the standard deviation. We also need the mean variability in pitch for schizophrenics and controls.
+
+We want to know how distance there is between schizophrenic and controls and how much overlapping there is between them (big overlap = big standard deviation, small overlap = small standard deviation). A standardized dmean difference is taking into account how much overlap there is (how big the standard deviation is). 
+
+We have three studies each testing participants.
+
+How do we calculate the effect size?
+        - Use the package "metafor" and the function escalc() 
+
+Building a model: Now that we have an effect size per each study, what is the overal estimated effect size for all studies - the evidence for an increased pitch in schizophrenic patients. 
+
+
+## Questions to be answered ##
+
+1. What is the current evidence for distinctive vocal patterns in schizophrenia? Report how many papers report quantitative estimates, comment on what percentage of the overall studies reviewed they represent (see PRISMA chart) your method to analyze them, the estimated effect size of the difference (mean effect size and standard error) and forest plots representing it. N.B. Only measures of pitch mean and pitch sd are required for the assignment. Feel free to ignore the rest (although pause behavior looks interesting, if you check my article).
+
+2. Do the results match your own analysis from Assignment 3? If you add your results to the meta-analysis, do the estimated effect sizes change? Report the new estimates and the new forest plots.
+
+3. Assess the quality of the literature: report and comment on heterogeneity of the studies (tau, I2), on publication bias (funnel plot), and on influential studies.
+
+## Tips on the process to follow:
+
+- Download the data on all published articles analyzing voice in schizophrenia and the prisma chart as reference of all articles found and reviewed
+- Look through the dataset to find out which columns to use, and if there is any additional information written as comments (real world data is always messy!).
+    * Hint: PITCH_F0M and PITCH_F0SD group of variables are what you need
+    * Hint: Make sure you read the comments in the columns: `pitch_f0_variability`, `frequency`, `Title`,  `ACOUST_ANA_DESCR`, `DESCRIPTION`, and `COMMENTS`
+- Following the procedure in the slides calculate effect size and standard error of the effect size per each study. N.B. we focus on pitch mean and pitch standard deviation.
+ . first try using lmer (to connect to what you know of mixed effects models)
+ . then use rma() (to get some juicy additional statistics)
+
+- Build a forest plot of the results (forest(model))
+ 
+- Go back to Assignment 3, add your own study to the data table, and re-run meta-analysis. Do the results change?
+
+- Now look at the output of rma() and check tau and I2
+
+________________________________________________________________________________________________________
+
+First we assess the literature in this field:
+
+```{r}
+# Load the data
+data <- readxl::read_xlsx("Matrix_MetaAnalysis_Diagnosis_updated290719.xlsx")
+
+# Identify the columns containing sample size for schizophrenic and controls, the pitch mean for schizophrenic and controls, and the standard deviation for both groups:
+
+    # Sample size (n1 and n2): column SAMPLE_SIZE_HC  and column SAMPLE_SIZE_SZ
+    # Pitch mean (m1 and m2): column PITCH_F0_SZ_M and column PITCH_F0_HC_M
+    # Standard deviation (sd1 and sd2): column PITCH_F0_HC_SD and column PITCH_F0_SZ_SD
+
+# NB! We use 1 for healthy controls and 2 for schizophrenics.
+
+# These are the columns we need to analyzing pitch mean. We want the mean and standard deviation at the individual level (for a single study) and at the group level (for all of the participants). 
+
+# Now we need to calculate the effect sizes for pitch mean for each study
+
+PitchMeanES <- escalc("SMD", # standardized mean difference (effect size)
+                      n1i = SAMPLE_SIZE_HC, n2i = SAMPLE_SIZE_SZ,
+                      m1i = PITCH_F0_HC_M, m2i = PITCH_F0_SZ_M, 
+                      sd1i = PITCH_F0_HC_SD, sd2i = PITCH_F0_SZ_SD,
+                      data = data)
+
+# Now we have a dataframe with two new columns: yi and vi
+    # yi is the mean effect size (the mean expected difference) for each study. This is the average error       (the mean error) we make when we predict - a measure of uncertainty. 
+    # vi is the variance (squared standard deviation). 
+
+# Now we need to claculate the effect sizes for the pitch variability for each study
+
+PitchVarES <- escalc("SMD", # standardized mean difference
+n1i = SAMPLE_SIZE_HC, n2i = SAMPLE_SIZE_SZ,
+m1i = PITCH_F0SD_HC_M, m2i = PITCH_F0SD_SZ_M, 
+sd1i = PITCH_F0SD_HC_SD, sd2i = PITCH_F0SD_SZ_SD,
+data = data)
+
+# What is the meta-analytical effect size? This is equivalent to the evidence in the field for different pitch mean in schizophrenia. We make a model to calculate the meta-analytical effect size for both the pitch mean and for the pitch variability.
+
+# Pitch Mean
+
+model_PitchMeanES <- lmer(yi ~ 1 + (1|StudyID), PitchMeanES,
+     weights = 1/vi, # the studies with the most variance (vi) are weighted less in terms of effect size
+     REML = F, 
+     control = lmerControl(check.nobs.vs.nlev="ignore", check.nobs.vs.nRE="ignore"))
+
+summary(model_PitchMeanES)
+
+# Pitch Variability
+
+model_PitchVarES <- lmer(yi ~ 1 + (1|StudyID), PitchVarES,
+     weights = 1/vi, 
+     REML = F, 
+     control = lmerControl(check.nobs.vs.nlev="ignore", check.nobs.vs.nRE="ignore"))
+
+summary(model_PitchVarES)
+
+# We tell the model that different studies are different (random effect). We also tell the model that studies are different in a systematic way (differences in sample size for example).
+
+# We also give the model information about how much weight each study should have on the effect size in terms of variance/uncertainty. The bigger the variance (the larger the standard deviation) the less weight the study should have on the effect size - this is what we tell the model
+
+# Now we run the RMA-model (regression-meta-analysis) which is basically the same thing, but the difference is that it also makes the Forest Plot. NB! When you look at the plot, the size of the square is equivalent to the size of the sample size.
+# RMA gives us the meta-analytic effect size. 
+
+# Pitch Mean 
+RMA_model_PitchMean <- rma(yi, vi, data = PitchMeanES, slab = StudyID)
+
+summary(RMA_model_PitchMean)
+
+# We use the forest() function to get a plot of the distribution of the effect sizes
+forest(RMA_model_PitchMean) 
+
+# We use the funnel() function to get a plot to see if there is a pulication bias
+funnel(RMA_model_PitchMean) 
+
+# This funnel plots suggests that there is not a publication bias, given that there are published studies both with positive effects sizes and negative effect size, and also the fact that the effects sizes in general are close to 0, which indicaites that there has not been a publication bias.
+
+# We use the influence() function to look for influential data points.
+influence(RMA_model_PitchMean)
+
+# Pitch Varibility
+
+RMA_model_PitchVariance <- rma(yi, vi, data = PitchVarES, slab = StudyID)
+
+summary(RMA_model_PitchVariance)
+
+# We use the forest() function to get a plot of the distribution of the effect sizes
+forest(RMA_model_PitchVariance) 
+
+# We use the funnel() function to get a plot to see if there is a pulication bias
+funnel(RMA_model_PitchVariance) 
+
+# This funnel plots displays that there is a slight publication bias. We can see that the larger the effect size the more likely it is to be published even though the standard error is very large (small sample size). There are more studies with positive effect sizes that have been published compared to the number of studies with a negative effect size that have been published, which suggests a publication bias.
+
+# We use the influence() function to look for influential data points.
+influence(RMA_model_PitchVariance)
+
+# We check what the quality of the field is: Publication bias? Influential data points?
+
+```
+
+Now we need to include our own study in the meta-analysis
+
+We need a "yi" (SMD) and a "vi" (variance). 
+
+How do we calcualte the "yi" (Cohen's d - SMD - standard mean difference)?
+- SMD = scaled/standardized difference between two groups. The beta for diagnosis (a contrast: Schizophrenic vs. control) is our yi. The beta is a standardized mean difference (Cohen's d).
+
+How do we calculate "vi" (squared standard deviation)?
+- There are two ways of doing this:
+        1. We could take the standard error of the beta of Diagnosis (but this is kind of cheating)
+        2. Because standard deviation is the average error in our prediciton, we could look at the                   residuals - the average residual is the standard deviation. We square this and we get                     "vi".
+
+```{r}
+# First we load the data from assignment 3
+pitch_data <- read.csv("pitch_data.csv")
+
+# We create a column containing the scaled pitch variability
+pitch_data$mean_pitch_scaled <- scale(pitch_data$mean_hz)
+
+# We split it into two separate data frames
+pitch_data_controls <- filter(pitch_data, Diagnosis == 0)
+pitch_data_schizophrenic <- filter(pitch_data, Diagnosis == 1)
+
+# Now we create a column containing the scaled pitch variability for each data frame
+pitch_data_controls$pitch_variability_scaled <- sd(pitch_data_controls$mean_pitch_scaled)
+pitch_data_schizophrenic$pitch_variability_scaled <- sd(pitch_data_schizophrenic$mean_pitch_scaled)
+
+# Now we merge the two dataframes (hc and schizophrenic)
+pitch_data <- rbind(pitch_data_controls, pitch_data_schizophrenic)
+
+# Mean Pitch
+
+# Now we can make the model
+model_pitch_data_mean_pitch <- lmer(mean_pitch_scaled ~ Diagnosis + (1 | Diagnosis) + (1 | Participant), data = pitch_data)
+
+summary(model_pitch_data_mean_pitch)
+
+# We can see from the outout our "yi" and this is the beta for Diagnosis (-1.5980)
+
+# We now take the squared average residual which is our "vi" for mean pitch
+mean(resid(model_pitch_data_1))^2
+
+# Now we have our yi (effect size) and vi (variance) for pitch mean. Now we do the same for pitch variability
+
+# Pitch Variability
+
+model_pitch_data_pitch_variability <- lmer(pitch_variability_scaled ~ Diagnosis + (1 | Diagnosis) + (1 | Participant), data = pitch_data)
+
+summary(model_pitch_data_pitch_variability)
+
+# We can see from the outout our "yi" and this is the beta for Diagnosis (-1.085)
+
+# We now take the squared average residual which is our "vi" for pitch variability
+mean(resid(model_pitch_data_pitch_variability))^2 
+
+# Now we need to combine this data with the data from the meta-analysis
+
+# First we need to make unique IDs for each participant in eahc study in order to find our how big our sample size is 
+
+pitch_data$unique_ID <- paste(pitch_data$Participant, pitch_data$Study, sep = "_")
+
+pitch_data$unique_ID <- as.factor(pitch_data$unique_ID)
+
+# Now we have made sure that the participants do not overlap. Now we have a column with a unique ID for each participant with the partipant number and the study they are in
+
+# Now we can assess how big our sample is (how many participants)
+unique(pitch_data$unique_ID) 
+
+# We have 204 levels, which means that there are 204 participants.
+
+# We do not know how many are schizoprehnic and how many are controls, which is why we make unique ideas for the healthy controls and we can then subtract them from the whole number
+
+pitch_data_controls$unique_ID <- paste(pitch_data_controls$Participant, pitch_data_controls$Study, sep = "_")
+
+pitch_data_controls$unique_ID <- as.factor(pitch_data_controls$unique_ID)
+
+unique(pitch_data_controls$unique_ID) 
+
+# There are 173 healthy controls. This means that there are 173 healthy controls and 204-173 = 31 schizophrenics. 
+
+# Now we know our sample size (173 = hc, 31 = sz, total = 204)
+
+# Now we create a data frame for both mean pitch and pitch variability containing the columns we need for the study from our assignment 3
+
+own_study_mean_pitch <- data.frame(SAMPLE_SIZE_HC = 173, 
+                        SAMPLE_SIZE_SZ = 31, 
+                        PITCH_F0_HC_M = mean(pitch_data_controls$mean_pitch_scaled), 
+                        PITCH_F0_SZ_M = mean(pitch_data_schizophrenic$mean_pitch_scaled), 
+                        PITCH_F0_HC_SD = sd(pitch_data_controls$mean_pitch_scaled), 
+                        PITCH_F0_SZ_SD = sd(pitch_data_schizophrenic$mean_pitch_scaled),
+                        StudyID = 100, # we do this so the studyIDs will not overlap
+                        yi = -1.5980,
+                        vi = 2.082289e-33)
+
+own_study_pitch_variability <- data.frame(SAMPLE_SIZE_HC = 173, 
+                        SAMPLE_SIZE_SZ = 31, 
+                        PITCH_F0SD_HC_M = mean(pitch_data_controls$pitch_variability_scaled), 
+                        PITCH_F0SD_SZ_M = mean(pitch_data_schizophrenic$pitch_variability_scaled), 
+                        PITCH_F0SD_HC_SD = sd(pitch_data_controls$pitch_variability_scaled), 
+                        PITCH_F0SD_SZ_SD = sd(pitch_data_schizophrenic$pitch_variability_scaled),
+                        StudyID = 100,
+                        yi = -1.085,
+                        vi = 8.11861e-27)
+
+# Now we need to filter away the columns we do not need
+
+PitchMeanES_select <- select(PitchMeanES, SAMPLE_SIZE_HC, SAMPLE_SIZE_SZ, PITCH_F0_HC_M, PITCH_F0_SZ_M, PITCH_F0_HC_SD, PITCH_F0_SZ_SD, StudyID, yi, vi)
+
+PitchVarES_select <- select(PitchMeanES, SAMPLE_SIZE_HC, SAMPLE_SIZE_SZ, PITCH_F0SD_HC_M, PITCH_F0SD_SZ_M, PITCH_F0SD_HC_SD, PITCH_F0SD_SZ_SD, StudyID, yi, vi)
+
+# Now we need to bind the data frames
+
+PitchMeanES_all <- dplyr::bind_rows(PitchMeanES_select, own_study_mean_pitch)
+
+PitchVarES_all <- dplyr::bind_rows(PitchVarES_select, own_study_pitch_variability)
+
+# Converting to factors
+PitchMeanES_all$StudyID <- as.factor(PitchMeanES_all$StudyID)
+PitchVarES_all$StudyID <- as.factor(PitchVarES_all$StudyID)
+
+#Calculting exact effectsize for pitch mean and pitch variability for each study
+PitchMeanES_calc <- escalc("SMD",
+                           n1i = SAMPLE_SIZE_HC, n2i = SAMPLE_SIZE_SZ,
+                           m1i = PITCH_F0_HC_M, m2i = PITCH_F0_SZ_M,
+                           sd1i = PITCH_F0_HC_SD, sd2i = PITCH_F0_SZ_SD,
+                           data = PitchMeanES_all)
+
+PitchVarES_calc <- escalc("SMD",
+                          n1i = SAMPLE_SIZE_HC, n2i = SAMPLE_SIZE_SZ,
+                          m1i = PITCH_F0SD_HC_M, m2i = PITCH_F0SD_SZ_M,
+                          sd1i = PITCH_F0SD_HC_SD, sd2i = PITCH_F0SD_SZ_SD,
+                          data = PitchVarES_all)
+
+# Now we can run the models for mean pitch and pitch variability
+
+PitchMeanModelAll <- lmer(yi ~ 1 + (1|StudyID), PitchMeanES_calc, 
+                          weights = 1/vi, REML=F,
+                          control = lmerControl(check.nobs.vs.nlev="ignore", check.nobs.vs.nRE="ignore"))
+
+summary(PitchMeanModelAll)
+
+PitchVarModelAll <- lmer(yi ~ 1 + (1|StudyID), PitchVarES_calc, 
+                         weights = 1/vi, REML=F,
+                         control = lmerControl(check.nobs.vs.nlev="ignore", check.nobs.vs.nRE="ignore"))
+
+summary(PitchVarModelAll)
+
+# Now we make the RMA model for mean pitch and pitch variability
+
+# Mean Pitch
+
+RMA_model_PitchMean_all <- rma(yi, vi, data = PitchMeanES_calc, slab = StudyID)
+
+summary(RMA_model_PitchMean_all)
+
+# We use the forest() function to get a plot of the distribution of the effect sizes
+forest(RMA_model_PitchMean_all) 
+
+# We use the funnel() function to get a plot to see if there is a pulication bias
+funnel(RMA_model_PitchMean_all) 
+
+# We use the influence() function to look for influential data points.
+influence(RMA_model_PitchMean_all)
+
+# Pitch Varibility
+
+RMA_model_PitchVariance_all <- rma(yi, vi, data = PitchVarES_calc, slab = StudyID)
+
+summary(RMA_model_PitchVariance_all)
+
+# We use the forest() function to get a plot of the distribution of the effect sizes
+forest(RMA_model_PitchVariance_all) 
+
+# We use the funnel() function to get a plot to see if there is a pulication bias
+funnel(RMA_model_PitchVariance_all) 
+
+# This funnel plots displays that there is a slight publication bias. We can see that the larger the effect size the more likely it is to be published even though the standard error is very large (small sample size). There are more studies with positive effect sizes that have been published compared to the number of studies with a negative effect size that have been published, which suggests a publication bias.
+
+# We use the influence() function to look for influential data points.
+influence(RMA_model_PitchVariance_all)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
